@@ -5,7 +5,7 @@ from PyOpenWorm.neuron import Neuron
 from PyOpenWorm.context import Context
 from PyOpenWorm.connection import Connection
 
-import logging
+from c302 import print_
 
 ############################################################
 
@@ -14,87 +14,118 @@ import logging
 
 ############################################################
 
-logger = logging.getLogger("OpenWormReader")
 
 
-class OpenWormReader:
-    def __init__(self):
-        logger.info("Initialising OpenWormReader")
-        P.connect(configFile='.pow/pow.conf')
-        logger.info("Finished initialising OpenWormReader")
+def get_cells_in_model(net):
 
-    def readDataFromSpreadsheet(self, *IGNORED_args, **IGNORED_kwargs):
-        conns = []
-        cells = []
+    cell_names = []
+    for n in set(net.neurons()):
+        cell_names.append(str(n.name()))
 
-        ctx = Context(ident='http://openworm.org/data')
-        net = Worm().neuron_network()
-        c = ctx.stored(Connection)()
-        net.synapse(c)
-        c.post_cell(Neuron())
-        for s in c.load():
-            pre = str(s.pre_cell().name())
-            post = str(s.post_cell().name())
+    return sorted(cell_names)
 
-            if isinstance(s.post_cell(), Neuron):
-                syntype = str(s.syntype())
-                syntype = syntype[0].upper() + syntype[1:]
-                num = int(s.number())
-                synclass = str(s.synclass())
-                ci = ConnectionInfo(pre, post, num, syntype, synclass)
-                conns.append(ci)
-                if pre not in cells:
-                    cells.append(pre)
-                if post not in cells:
-                    cells.append(post)
+def read_data(include_nonconnected_cells=False):
 
-        logger.info("Total cells read " + str(len(cells)))
-        logger.info("Total connections read " + str(len(conns)))
-        P.disconnect()
+    print_("Initialising OpenWormReader")
+    connection = P.connect(configFile='.pow/pow.conf')
+    net = P.Worm().get_neuron_network()
+    all_connections = net.synapses()
+    print_("Finished initialising OpenWormReader")
+
+    conns = []
+    cells = []
+
+    cell_names = get_cells_in_model(net)
+
+    for s in all_connections:
+    ctx = Context(ident='http://openworm.org/data')
+    net = Worm().neuron_network()
+    c = ctx.stored(Connection)()
+    net.synapse(c)
+    c.post_cell(Neuron())
+    for s in c.load():
+        pre = str(s.pre_cell().name())
+        post = str(s.post_cell().name())
+
+        if isinstance(s.post_cell(), Neuron):
+            syntype = str(s.syntype())
+            syntype = syntype[0].upper() + syntype[1:]
+            num = int(s.number())
+            synclass = str(s.synclass())
+            ci = ConnectionInfo(pre, post, num, syntype, synclass)
+            conns.append(ci)
+            if pre not in cells:
+                cells.append(pre)
+            if post not in cells:
+                cells.append(post)
+
+    print_("Total cells %i (%i with connections)" % (len(cell_names), len(cells)))
+    print_("Total connections found %i " % len(conns))
+
+    P.disconnect(connection)
+    if include_nonconnected_cells:
+        return cell_names, conns
+    else:
         return cells, conns
 
 
 if __name__ == "__main__":
-    from UpdatedSpreadsheetDataReader import readDataFromSpreadsheet
+    cells, conns = read_data(include_nonconnected_cells=True)
 
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s: %(name)s - %(levelname)s: %(message)s')
-    owr = OpenWormReader()
+    print_("%i cells found using OpenWormReader: %s..."%(len(cells),sorted(cells)[0:3]))
 
-    cells, conns = owr.readDataFromSpreadsheet()
+    print_("Found %s connections using OpenWormReader: %s..."%(len(conns),conns[0]))
 
-    print("%i cells in OpenWormReader: %s..." % (len(cells), ", ".join(sorted(cells)[0:3])))
-
-    print("Found %s connections: %s..." % (len(conns), conns[0]))
-    pow_conns_map = {}
+    conn_map_OWR = {}
     for c in conns:
-        pow_conns_map[c.short()] = c
+        conn_map_OWR[c.short()] = c
 
-    cells2, conns2 = readDataFromSpreadsheet(include_nonconnected_cells=True)
+    from UpdatedSpreadsheetDataReader import read_data as read_data_usr
+    #from SpreadsheetDataReader import read_data as read_data_usr
 
-    spreadsheet_conns_map = {}
+    cells2, conns2 = read_data_usr(include_nonconnected_cells=True)
+
+    print_("%i cells found using UpdatedSpreadsheetDataReader: %s..."%(len(cells2),sorted(cells2)[0:3]))
+    print_("Found %s connections using UpdatedSpreadsheetDataReader: %s..."%(len(conns2),conns2[0]))
+
+    conn_map_USR = {}
     for c2 in conns2:
-        spreadsheet_conns_map[c2.short()] = c2
+        conn_map_USR[c2.short()] = c2
 
-    maxn = 3000
+    maxn = 30000
 
-    refs = list(pow_conns_map.keys())
+    refs_OWR = conn_map_OWR.keys()
 
-    for i in range(min(maxn, len(refs))):
+    matching = 0
+
+    for i in range(min(maxn, len(refs_OWR))):
         #print("\n-----  Connection in OWR: %s"%refs[i])
-        # print pow_conns_map[refs[i]]
-        if refs[i] in spreadsheet_conns_map:
-            if pow_conns_map[refs[i]].number != spreadsheet_conns_map[refs[i]].number:
-                print("Mismatch: %s != %s" % (pow_conns_map[refs[i]], spreadsheet_conns_map[refs[i]]))
+        ref = refs_OWR[i]
+        if ref in conn_map_USR:
+            if conn_map_OWR[ref].number != conn_map_USR[ref].number:
+                print_("Mismatch: %s != %s"%(conn_map_OWR[ref],conn_map_USR[ref]))
+            else:
+                matching+=1
         else:
-            print("Spreadsheet reader is missing %s" % pow_conns_map[refs[i]])
+            print_("Missing from UpdatedSpreadsheetDataReader: %s"%(conn_map_OWR[ref]))
 
-    refs = list(spreadsheet_conns_map.keys())
+    print_('Number matching: %i'%matching)
 
-    for i in range(min(maxn, len(refs))):
+    matching = 0
+
+    refs_USR = conn_map_USR.keys()
+
+    for i in range(min(maxn, len(refs_USR))):
         #print("\n-----  Connection in USR: %s"%refs[i])
-        # print spreadsheet_conns_map[refs[i]]
-        if refs[i] in pow_conns_map:
-            if pow_conns_map[refs[i]].number != spreadsheet_conns_map[refs[i]].number:
-                print("Mismatch: %s != %s" % (pow_conns_map[refs[i]], spreadsheet_conns_map[refs[i]]))
+        #print cm2[refs[i]]
+        ref = refs_USR[i]
+        if ref in conn_map_OWR:
+            if conn_map_OWR[ref].number != conn_map_USR[ref].number:
+                print_("Mismatch: %s != %s"%(conn_map_OWR[ref],conn_map_USR[ref]))
+            else:
+                matching+=1
         else:
-            print("PyOpenWorm reader is missing %s" % spreadsheet_conns_map[refs[i]])
+            print_("* Missing from OpenWormReader: %s"%conn_map_USR[ref])
+
+    print_('Number matching: %i'%matching)
+
