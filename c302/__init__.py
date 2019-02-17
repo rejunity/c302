@@ -25,11 +25,14 @@ import neuroml.writers as writers
 import neuroml.loaders as loaders
 
 from . import bioparameters
-from PyOpenWorm import connect as pow_connect
+from .constants import POW_DATA_CTX_ID
+
+from PyOpenWorm import connect as pow_connect, __version__ as pow_version
 from PyOpenWorm.neuron import Neuron
 from PyOpenWorm.cell import Cell
 from PyOpenWorm.muscle import Muscle
 from PyOpenWorm.worm import Worm
+from PyOpenWorm.context import Context
 
 import airspeed
 
@@ -441,56 +444,58 @@ def elem_in_coll_matches_conn(coll, conn):
 
 
 def _get_cell_info(cells):
-    #Get the worm object.
-    worm = Worm()
+    # Get the worm object.
 
-    #Extract the network object from the worm object.
-    qcell = Cell()
-    worm.cell(qcell)
+    with pow_connect(configFile='.pow/pow.conf') as conn:
+        ctx = Context(ident=POW_DATA_CTX_ID, conf=conn.conf).stored
 
-    #Go through our list and get the neuron object associated with each name.
-    #Store these in another list.
-    all_neuron_info = collections.OrderedDict()
-    all_muscle_info = collections.OrderedDict()
+        for cname in cells:
+            # worm = ctx(Worm)()
+            # Extract the network object from the worm object.
+            qcell = ctx(Cell).query(name=cname)
+            # worm.cell(qcell)
 
-    for cell in qcell.load():
-        short = ') %s' % cell.name()
+            # Go through our list and get the neuron object associated with each name.
+            # Store these in another list.
+            all_neuron_info = collections.OrderedDict()
+            all_muscle_info = collections.OrderedDict()
 
-        color = '.5 0 0'
-        if isinstance(cell, Neuron):
-            types = cell.type()
-            if 'sensory' in types:
-                short = 'Se%s'%short
-                color = '1 .2 1'
-            if 'interneuron' in types:
-                short = 'In%s'%short
-                color = '1 0 .4'
-            if 'motor' in types:
-                short = 'Mo%s'%short
-                color = '.5 .4 1'
-        elif isinstance(cell, Muscle):
-            short = 'Mu%s'%short
-            color = '0 0.6 0'
+            for cell in qcell.load():
+                short = ') %s' % cell.name()
 
+                color = '.5 0 0'
+                if isinstance(cell, Neuron):
+                    types = cell.type()
+                    if 'sensory' in types:
+                        short = 'Se%s' % short
+                        color = '1 .2 1'
+                    if 'interneuron' in types:
+                        short = 'In%s' % short
+                        color = '1 0 .4'
+                    if 'motor' in types:
+                        short = 'Mo%s' % short
+                        color = '.5 .4 1'
+                elif isinstance(cell, Muscle):
+                    short = 'Mu%s' % short
+                    color = '0 0.6 0'
 
-        short = '(%s'%short
+                short = '(%s' % short
 
+                if isinstance(cell, Neuron):
+                    if 'GABA' in cell.neurotransmitter():
+                        short = '- %s' % short
+                    elif len(cell.neurotransmitter()) == 0:
+                        short = '? %s' % short
+                    else:
+                        short = '+ %s' % short
+                else:
+                    short = '? %s' % short
 
-        if isinstance(cell, Neuron):
-            if 'GABA' in cell.neurotransmitter():
-                short = '- %s'%short
-            elif len(cell.neurotransmitter()) == 0:
-                short = '? %s'%short
-            else:
-                short = '+ %s'%short
-        else:
-            short = '? %s'%short
-
-        if isinstance(cell, Neuron):
-            all_neuron_info[cell.name()] = (cell, cell.type(), cell.receptor(), cell.neurotransmitter(), short, color)
-        elif isinstance(cell, Muscle):
-            all_muscle_info[cell.name()] = (cell, [], cell.receptors(), cell.neurotransmitter(), short, color)
-
+                if isinstance(cell, Neuron):
+                    all_neuron_info[cell.name()] = (cell, cell.type(), cell.receptor(),
+                                                    cell.neurotransmitter(), short, color)
+                elif isinstance(cell, Muscle):
+                    all_muscle_info[cell.name()] = (cell, [], cell.receptors(), cell.neurotransmitter(), short, color)
 
     return all_neuron_info, all_muscle_info
 
@@ -546,8 +551,6 @@ def generate(net_id,
              param_overrides={},
              target_directory='./'):
 
-    pow_connect(configFile='.pow/pow.conf')
-
     validate = not (params.is_level_B() or params.is_level_C0() or params.is_level_C2 or params.is_level_D1())
 
     root_dir = os.path.dirname(os.path.abspath(__file__))
@@ -601,10 +604,9 @@ def generate(net_id,
 
     info = "\n\nParameters and setting used to generate this network:\n\n"+\
            "    Data reader:                    %s\n" % data_reader+\
-           "    c302 version:                   %s\n" % __version__
-    if P:
-        info+= "    PyOpenWorm version:             %s\n" % P.__version__
-    info+= "    Cells:                          %s\n" % (cells if cells is not None else "All cells")+\
+           "    c302 version:                   %s\n" % __version__+\
+           "    PyOpenWorm version:             %s\n" % pow_version+\
+           "    Cells:                          %s\n" % (cells if cells is not None else "All cells")+\
            "    Cell stimulated:                %s\n" % (cells_to_stimulate if cells_to_stimulate is not None else "All neurons")+\
            "    Connection:                     %s\n" % (conns_to_include if conns_to_include is not None else "All connections") + \
            "    Connection numbers overridden:  %s\n" % (conn_number_override if conn_number_override is not None else "None")+\
@@ -743,7 +745,6 @@ def generate(net_id,
             except Exception as e:
                 print("Skipping PyOpenWorm metadata", file=sys.stderr)
                 traceback.print_exc()
-                pass
 
             pop0.instances.append(inst)
 
@@ -1472,7 +1473,6 @@ def main():
 
 
 if __name__ == '__main__':
-
     main()
 
 
